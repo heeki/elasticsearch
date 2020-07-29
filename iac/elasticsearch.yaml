@@ -1,0 +1,300 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Elasticsearch cluster with Cognito authentication, within a VPC, behind an NGINX proxy
+
+Parameters:
+  ParamBucket:
+    Type: String
+  ParamVpcId:
+    Type: String
+  ParamSubnetIds:
+    Type: List<String>
+  ParamCidr:
+    Type: String
+  ParamEC2Image:
+    Type: String
+  ParamEC2Type:
+    Type: String
+  ParamEC2Key:
+    Type: String
+  ParamEBSCapacity:
+    Type: Number
+  ParamDomainName:
+    Type: String
+  ParamCognitoUserName:
+    Type: String
+  ParamCognitoUserEmail:
+    Type: String
+
+Resources:
+  # EC2
+  ProxyRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: proxy-s3
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: 
+                  - !Sub 'arn:aws:s3:::${ParamBucket}/*'
+  ProxyInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+        - !Ref ProxyRole
+  ProxySecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Proxy EC2 instance
+      VpcId: !Ref ParamVpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref ParamCidr
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Ref ParamCidr
+  ProxyInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref ParamEC2Image
+      InstanceType: !Ref ParamEC2Type
+      KeyName: !Ref ParamEC2Key
+      IamInstanceProfile: !Ref ProxyInstanceProfile
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true
+          DeviceIndex: 0
+          GroupSet:
+            - !Ref ProxySecurityGroup
+          SubnetId: !Select ["0", !Ref ParamSubnetIds]
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          yum update -y
+          amazon-linux-extras install nginx1.12 -y
+          openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/nginx/cert.key -out /etc/nginx/cert.crt -subj "/C=US/ST=NY/L=NYC/O=AWS/OU=AWS/CN=proxy/emailAddress=john.doe@acme.com"
+          aws s3 cp s3://${ParamBucket}/elasticsearch/nginx.conf /etc/nginx/nginx.conf
+          sleep 5
+          sed -i 's/$ELASTICSEARCH_ENDPOINT/${ElasticsearchDomain.DomainEndpoint}/' /etc/nginx/nginx.conf
+          sed -i 's/$COGNITO_ENDPOINT/${ParamDomainName}.auth.${AWS::Region}.amazoncognito.com/' /etc/nginx/nginx.conf
+          chkconfig nginx on
+          systemctl start nginx
+
+  # Cognito
+  CognitoUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+          RequireUppercase: true
+          TemporaryPasswordValidityDays: 3
+  CognitoDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Ref ParamDomainName
+      UserPoolId: !Ref CognitoUserPool
+  CognitoClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ExplicitAuthFlows:
+        - ALLOW_ADMIN_USER_PASSWORD_AUTH
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      GenerateSecret: false
+      UserPoolId: !Ref CognitoUserPool
+  CognitoUser:
+    Type: AWS::Cognito::UserPoolUser
+    Properties:
+      Username: !Ref ParamCognitoUserName
+      UserPoolId: !Ref CognitoUserPool
+      UserAttributes:
+        - Name: email
+          Value: !Ref ParamCognitoUserEmail
+        - Name: email_verified
+          Value: true
+      ForceAliasCreation: true
+  CognitoGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      Precedence: 0
+      UserPoolId: !Ref CognitoUserPool
+  CognitoIdentityPool:
+    Type: AWS::Cognito::IdentityPool
+    Properties:
+      AllowUnauthenticatedIdentities: false
+      # CognitoIdentityProviders:
+      #   - ProviderName: !GetAtt CognitoUserPool.ProviderName
+      #     ClientId: !Ref CognitoClient
+  CognitoRoleAuth:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: cognito-identity.amazonaws.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              "StringEquals":
+                cognito-identity.amazonaws.com:aud: !Ref CognitoIdentityPool
+              "ForAnyValue:StringLike":
+                cognito-identity.amazonaws.com:amr: authenticated
+      Path: /
+      Policies:
+        - PolicyName: es-full
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - es:ESHttp*
+                Resource: !Sub 'arn:aws:es:${AWS::Region}:${AWS::AccountId}:domain/${ParamDomainName}/*'
+  CognitoRoleUnauth:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: cognito-identity.amazonaws.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              "StringEquals":
+                cognito-identity.amazonaws.com:aud: !Ref CognitoIdentityPool
+              "ForAnyValue:StringLike":
+                cognito-identity.amazonaws.com:amr: unauthenticated
+      Path: /
+      Policies:
+        - PolicyName: es-readonly
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - es:Describe*
+                  - es:List*
+                Resource: !Sub 'arn:aws:es:${AWS::Region}:${AWS::AccountId}:domain/${ParamDomainName}/*'
+  CognitoIdentityRoleAttachment:
+    Type: AWS::Cognito::IdentityPoolRoleAttachment
+    Properties:
+      IdentityPoolId: !Ref CognitoIdentityPool
+      Roles:
+        "authenticated": !GetAtt CognitoRoleAuth.Arn
+        "unauthenticated": !GetAtt CognitoRoleUnauth.Arn
+      # RoleMappings:
+      #   "cognito-idp.us-east-1.amazonaws.com/us-east-1_xxxxxxxx:aaaaaaaaaaaaaaaaaaaaaaaaaa":
+      #     AmbiguousRoleResolution: AuthenticatedRole
+      #     Type: Token
+
+  # Elasticsearch
+  ElasticsearchRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: es.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /service-role/
+      Policies:
+        - PolicyName: es-base
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cognito-idp:DescribeUserPool
+                  - cognito-idp:CreateUserPoolClient
+                  - cognito-idp:DeleteUserPoolClient
+                  - cognito-idp:DescribeUserPoolClient
+                  - cognito-idp:AdminInitiateAuth
+                  - cognito-idp:AdminUserGlobalSignOut
+                  - cognito-idp:ListUserPoolClients
+                  - cognito-identity:DescribeIdentityPool
+                  - cognito-identity:UpdateIdentityPool
+                  - cognito-identity:SetIdentityPoolRoles
+                  - cognito-identity:GetIdentityPoolRoles
+                Resource: "*"
+        - PolicyName: es-additional
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeVpcs
+                  - cognito-identity:ListIdentityPools
+                  - cognito-idp:ListUserPools
+                  - iam:GetRole
+                  - iam:PassRole
+                Resource: "*"
+  ElasticsearchSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Elasticsearch cluster
+      VpcId: !Ref ParamVpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourceSecurityGroupId: !Ref ProxySecurityGroup
+  ElasticsearchDomain:
+    Type: AWS::Elasticsearch::Domain
+    Properties:
+      # AccessPolicies:
+      #   Statement:
+      #     - Effect: Allow
+      #       Principal:
+      #         AWS:
+      #           - !GetAtt CognitoRoleAuth.Arn
+      #       Action:
+      #         - "es:ESHttp*"
+      #       Resource: !Sub 'arn:aws:es:${AWS::Region}:${AWS::AccountId}:domain/${ParamDomainName}/*'
+      CognitoOptions:
+        Enabled: true
+        IdentityPoolId: !Ref CognitoIdentityPool
+        RoleArn: !GetAtt ElasticsearchRole.Arn
+        UserPoolId: !Ref CognitoUserPool
+      DomainName: !Ref ParamDomainName
+      ElasticsearchVersion: "7.4"
+      EBSOptions:
+        EBSEnabled: true
+        VolumeSize: !Ref ParamEBSCapacity
+        VolumeType: gp2
+      VPCOptions:
+        SecurityGroupIds:
+          - !Ref ElasticsearchSecurityGroup
+        SubnetIds: !Ref ParamSubnetIds
+
+Outputs:
+  OutDomainArn:
+    Value: !GetAtt ElasticsearchDomain.DomainArn
+  OutDomainEndpoint:
+    Value: !GetAtt ElasticsearchDomain.DomainEndpoint
+  OutProxyPublicDnsName:
+    Value: !GetAtt ProxyInstance.PublicDnsName
+  OutProxyPublicIp:
+    Value: !GetAtt ProxyInstance.PublicIp
+  OutCognitoUserPool:
+    Value: !Ref CognitoUserPool
+  OutCognitoProviderName:
+    Value: !GetAtt CognitoUserPool.ProviderName
+  OutCognitoProviderUrl:
+    Value: !GetAtt CognitoUserPool.ProviderURL
+  OutCognitoClientId:
+    Value: !Ref CognitoClient
