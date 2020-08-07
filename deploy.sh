@@ -30,6 +30,7 @@ PARAMS="$PARAMS ParameterKey=ParamEBSCapacity,ParameterValue=$EBS_CAPACITY"
 PARAMS="$PARAMS ParameterKey=ParamDomainName,ParameterValue=$DOMAINNAME"
 PARAMS="$PARAMS ParameterKey=ParamCognitoUserName,ParameterValue=$COGNITO_USERNAME"
 PARAMS="$PARAMS ParameterKey=ParamCognitoUserEmail,ParameterValue=$COGNITO_USEREMAIL"
+# PARAMS="$PARAMS ParameterKey=ParamESUserArn,ParameterValue=$ES_USERARN"
 
 aws --profile $PROFILE cloudformation ${VERB}-stack \
 --stack-name $STACK \

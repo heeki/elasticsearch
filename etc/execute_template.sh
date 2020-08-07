@@ -2,6 +2,7 @@
 
 # step 0
 export PROFILE=local-profile-name
+export REGION=us-east-1
 export PROXY_BUCKET=bucket-where-nginx-config-was-uploaded
 export VPCID=vpc-abcdefgh
 export SUBNETID1=subnet-abcdefgh
@@ -15,8 +16,9 @@ export DOMAINNAME=name-for-cognito-and-elasticsearch-domains
 export COGNITO_USERNAME=username
 export COGNITO_USEREMAIL=username@domain.com
 
-# step 1
+# step 2
 export COGNITO_USERTEMPPW=temp-password-emailed-to-email-address
 export COGNITO_USERPERMPW=new-permanent-password
 export COGNITO_USERPOOL=output-from-cloudformation-OutCognitoUserPool
 export COGNITO_CLIENTID=output-from-cloudformation-OutCognitoClientId
+export COGNITO_IDENTITYPOOL=us-east-1:abcdefgh-1234-1234-1234-abcdefghijkl

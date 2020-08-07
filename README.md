@@ -1,8 +1,5 @@
 # Deploying Elasticsearch
-The provided repository is an amalgamation of my own learnings for deploying a basic Elasticsearch cluster for local testing.
-The cluster is deployed within a VPC and is accessed via an NGINX reverse proxy. Access to Kibana is also protected using
-Cognito authentication.
-
+The provided repository is an amalgamation of my own learnings for deploying a basic Elasticsearch cluster for local testing. The cluster is deployed within a VPC and is accessed via an NGINX reverse proxy. Access to Kibana can optionally be protected using Cognito authentication.
 
 ## Step 0
 Create a bucket (or use an existing bucket) and upload `iac/nginx.conf` to key `elasticsearch/nginx.conf`.
@@ -16,9 +13,31 @@ source etc/execute_env.sh
 ./deploy.sh -p $PROFILE -t iac/elasticsearch.yaml -s elasticsearch -v create
 ```
 
-Sit back and take a breather. The stack will take roughly 15 minutes to create. I've observed the Elasticsearch piece alone takes the majority of the time.
+The stack will take roughly 15 minutes to create. I've observed the Elasticsearch piece alone takes the majority of the time.
 
-After the stack is initially deployed, we need to make one update to the stack. In the template, search for the `CognitoIdentityRoleAttachment` resource. Uncomment the `RoleMappings` property and update the first key to comply with the following pattern: `cognito-idp.${AWS::Region}.amazonaws.com/${CognitoUserPool.ProviderName}:${ElasticsearchCognitoClientId}`.
+Once the stack is created and the EC2 instance is finished with its initialization, access the Kibana page at https://!{OutProxyPublicDnsName}/_plugin/kibana.
+
+
+## Step 1 (Optional)
+NOTE: This step is only needed if Cognito is going to be enabled.
+
+In the `ElasticsearchDomain` resource, update the `CognitoOptions` property. Set Enabled to true and update to associated additional properties.
+
+```yaml
+      CognitoOptions:
+        Enabled: true
+        IdentityPoolId: !Ref CognitoIdentityPool
+        RoleArn: !GetAtt ElasticsearchRole.Arn
+        UserPoolId: !Ref CognitoUserPool
+```
+
+Execute the update stack script. This will create a new Cognito app client id specific to Elasticsearch.
+
+```bash
+./deploy.sh -p $PROFILE -t iac/elasticsearch.yaml -s elasticsearch -v update
+```
+
+After the stack is finished updating, we need to add a role attachment setting. In the template, search for the `CognitoIdentityRoleAttachment` resource. Uncomment the `RoleMappings` property and update the first key to comply with the following pattern: `cognito-idp.${AWS::Region}.amazonaws.com/${CognitoUserPool.ProviderName}:${ElasticsearchCognitoClientId}`. Note that the `${ElasticsearchCognitoClientId}` should be the new app client id that was created in the previous stack update.
 * CloudFormation -> Resources -> CognitoUserPool -> App clients -> AWSElasticsearch-*
 * Copy the app client id
 * Update the template to look like the following:
@@ -30,16 +49,16 @@ After the stack is initially deployed, we need to make one update to the stack. 
           Type: Token
 ```
 
-Save the updated template and execute the helper script to deploy the update.
+Execute the update stack script.
 
 ```bash
 ./deploy.sh -p $PROFILE -t iac/elasticsearch.yaml -s elasticsearch -v update
 ```
 
-## Step 1
-Set the password for the Cognito user. To do this, first we need to update `etc/execute_env.sh` with some new values.
+## Step 2 (Optional)
+NOTE: This step is only needed if Cognito is going to be enabled.
 
-Now that the Cognito user pool and user has been created, an email should have been sent with a temporary password. Update `COGNITO_USERTEMPPW` with that value. Generate a new permanent password that complies with the password requirements and update `COGNITO_USERPERMPW` with that value.
+The Cognito user that we created initially starts with a `FORCE_CHANGE_PASSWORD` status. This step will update the user status to `CONFIRMED`. To do this, set the password for the Cognito user. First we need to update `etc/execute_env.sh` with some new values. An email should have been sent to the configured email address with a temporary password. Update `COGNITO_USERTEMPPW` with that value. Generate a new permanent password that complies with the password requirements and update `COGNITO_USERPERMPW` with that value.
 
 Use the provided helper script documented below to retrieve the outputs from the CloudFormation template.
 
@@ -49,16 +68,12 @@ Use the provided helper script documented below to retrieve the outputs from the
 
 Use those outputs to update the values for `COGNITO_USERPOOL` and `COGNITO_CLIENTID` in `etc/execute_env.sh`.
 
-Now we will update the user that we created from status `FORCE_CHANGE_PASSWORD` to `CONFIRMED`. The output should be a JSON message that includes the AccessToken, IdToken, Refreshtoken, etc. 
+Execute the cognito password update script. The output should be a JSON message that includes the AccessToken, IdToken, Refreshtoken, etc. 
 
 ```bash
 source etc/execute_env.sh
 ./cognito.sh
 ```
-
-## Step 2
-Access the Kibana page by accessing https://!{OutProxyPublicDnsName}/_plugin/kibana. Login with the Cognito user name and the permanent password that you set.
-
 
 ## Troubleshooting Notes (Lessons Learned)
 Below are some configuration error messages that I encountered between Cognito and Kibana and the resolution for the issues.

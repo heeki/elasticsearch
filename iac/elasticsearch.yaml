@@ -24,6 +24,8 @@ Parameters:
     Type: String
   ParamCognitoUserEmail:
     Type: String
+  # ParamESUserArn:
+  #   Type: String
 
 Resources:
   # EC2
@@ -256,20 +258,31 @@ Resources:
   ElasticsearchDomain:
     Type: AWS::Elasticsearch::Domain
     Properties:
-      # AccessPolicies:
-      #   Statement:
-      #     - Effect: Allow
-      #       Principal:
-      #         AWS:
-      #           - !GetAtt CognitoRoleAuth.Arn
-      #       Action:
-      #         - "es:ESHttp*"
-      #       Resource: !Sub 'arn:aws:es:${AWS::Region}:${AWS::AccountId}:domain/${ParamDomainName}/*'
+      AccessPolicies:
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "*"
+            Action: es:ESHttp*
+          #   Condition:
+          #     IpAddress:
+          #       "aws:SourceIp": 10.0.10.0/23
+            Resource: !Sub 'arn:aws:es:${AWS::Region}:${AWS::AccountId}:domain/${ParamDomainName}/*'
+          # - Effect: Allow
+          #   Principal:
+          #     AWS: !Ref ParamESUserArn
+          #   Action: es:ESHttp*
+          #   Resource: !Sub 'arn:aws:es:${AWS::Region}:${AWS::AccountId}:domain/${ParamDomainName}/*'
+          # - Effect: Allow
+          #   Principal:
+          #     AWS: !GetAtt CognitoRoleAuth.Arn
+          #   Action: es:ESHttp*
+          #   Resource: !Sub 'arn:aws:es:${AWS::Region}:${AWS::AccountId}:domain/${ParamDomainName}/*'
       CognitoOptions:
-        Enabled: true
-        IdentityPoolId: !Ref CognitoIdentityPool
-        RoleArn: !GetAtt ElasticsearchRole.Arn
-        UserPoolId: !Ref CognitoUserPool
+        Enabled: false
+        # IdentityPoolId: !Ref CognitoIdentityPool
+        # RoleArn: !GetAtt ElasticsearchRole.Arn
+        # UserPoolId: !Ref CognitoUserPool
       DomainName: !Ref ParamDomainName
       ElasticsearchVersion: "7.4"
       EBSOptions:
@@ -298,3 +311,5 @@ Outputs:
     Value: !GetAtt CognitoUserPool.ProviderURL
   OutCognitoClientId:
     Value: !Ref CognitoClient
+  OutCognitoIdentityPool:
+    Value: !Ref CognitoIdentityPool
