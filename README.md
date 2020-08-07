@@ -63,7 +63,7 @@ The Cognito user that we created initially starts with a `FORCE_CHANGE_PASSWORD`
 Use the provided helper script documented below to retrieve the outputs from the CloudFormation template.
 
 ```bash
-./describe.sh -p 1527 -s elasticsearch
+./describe.sh -p $PROFILE -s elasticsearch
 ```
 
 Use those outputs to update the values for `COGNITO_USERPOOL` and `COGNITO_CLIENTID` in `etc/execute_env.sh`.
