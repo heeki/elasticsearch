@@ -26,6 +26,8 @@ Parameters:
     Type: String
   # ParamESUserArn:
   #   Type: String
+  ParamFnSG:
+    Type: String
 
 Resources:
   # EC2
@@ -63,13 +65,13 @@ Resources:
       VpcId: !Ref ParamVpcId
       SecurityGroupIngress:
         - IpProtocol: tcp
-          FromPort: 22
-          ToPort: 22
+          FromPort: 443
+          ToPort: 443
           CidrIp: !Ref ParamCidr
         - IpProtocol: tcp
           FromPort: 443
           ToPort: 443
-          CidrIp: !Ref ParamCidr
+          SourceSecurityGroupId: !Ref ParamFnSG
   ProxyInstance:
     Type: AWS::EC2::Instance
     Properties:
