@@ -10,6 +10,8 @@ Parameters:
     Type: List<String>
   ParamCidr:
     Type: String
+  ParamZoneId:
+    Type: String
   ParamEC2Image:
     Type: String
   ParamEC2Type:
@@ -97,6 +99,15 @@ Resources:
           sed -i 's/$COGNITO_ENDPOINT/${ParamDomainName}.auth.${AWS::Region}.amazoncognito.com/' /etc/nginx/nginx.conf
           chkconfig nginx on
           systemctl start nginx
+  ProxyAlias:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref ParamZoneId
+      Name: elasticsearch.heeki.cloud
+      ResourceRecords:
+        - !GetAtt ProxyInstance.PublicIp
+      TTL: 900
+      Type: A
 
   # Cognito
   CognitoUserPool:
