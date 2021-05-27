@@ -1,24 +1,47 @@
 # Deploying Elasticsearch
 The provided repository is an amalgamation of my own learnings for deploying a basic Elasticsearch cluster for local testing. The cluster is deployed within a VPC and is accessed via an NGINX reverse proxy. Access to Kibana can optionally be protected using Cognito authentication.
 
-## Step 0
-Create a bucket (or use an existing bucket) and upload `iac/nginx.conf` to key `elasticsearch/nginx.conf`.
+## Step 0: Setup Configurations
+Create a bucket (or use an existing bucket) and upload `proxy/iac/nginx.conf` to key `elasticsearch/nginx.conf`.
+Copy the `etc/environment_template.sh` file to your own `etc/environment.sh` file and update the variables in the step 0 section.
 
-Copy the `etc/execute_template.sh` file to your own `etc/execute_env.sh` file and update the variables in the step 0 section.
-
-Deploy the CloudFormation templates using the helper scripts as defined below.
-
+## Step 1: Deploy Certificates and Security Groups
 ```bash
-source etc/execute_env.sh
-./deploy.sh -p $PROFILE -t iac/elasticsearch.yaml -s elasticsearch -v create
+cd core
+make cert
+make sgroup
 ```
 
-The stack will take roughly 15 minutes to create. I've observed the Elasticsearch piece alone takes the majority of the time.
+## Step 2: Deploy Elasticsearch
+```bash
+cd elasticsearch
+make elasticsearch
+```
+The Elasticsearch stack will take roughly 15 minutes to create with the creation of the Elasticsearch cluster itself (versus other supporting resources) taking the majority of the time.
 
+## Step 3: Deploy Proxy for Kibana Access
 Once the stack is created and the EC2 instance is finished with its initialization, access the Kibana page at https://!{OutProxyPublicDnsName}/_plugin/kibana.
 
+```bash
+cd proxy
+make proxy
+```
 
-## Step 1 (Optional)
+## Step 4: Deploy Layer
+Deploy the Logs API layer.
+
+```bash
+cd layer_lapi
+make layer
+```
+
+## Step 5: Deploy Lambda function with Logs API Extension
+```bash
+cd lambda
+make sam
+```
+
+## Appendix A: Enable Cognito for Elasticsearch (Optional)
 NOTE: This step is only needed if Cognito is going to be enabled.
 
 In the `ElasticsearchDomain` resource, update the `CognitoOptions` property. Set Enabled to true and update to associated additional properties.
@@ -34,7 +57,8 @@ In the `ElasticsearchDomain` resource, update the `CognitoOptions` property. Set
 Execute the update stack script. This will create a new Cognito app client id specific to Elasticsearch.
 
 ```bash
-./deploy.sh -p $PROFILE -t iac/elasticsearch.yaml -s elasticsearch -v update
+cd elasticsearch
+make elasticsearch.update
 ```
 
 After the stack is finished updating, we need to add a role attachment setting. In the template, search for the `CognitoIdentityRoleAttachment` resource. Uncomment the `RoleMappings` property and update the first key to comply with the following pattern: `cognito-idp.${AWS::Region}.amazonaws.com/${CognitoUserPool.ProviderName}:${ElasticsearchCognitoClientId}`. Note that the `${ElasticsearchCognitoClientId}` should be the new app client id that was created in the previous stack update.
@@ -52,10 +76,11 @@ After the stack is finished updating, we need to add a role attachment setting. 
 Execute the update stack script.
 
 ```bash
-./deploy.sh -p $PROFILE -t iac/elasticsearch.yaml -s elasticsearch -v update
+cd elasticsearch
+make elasticsearch.update
 ```
 
-## Step 2 (Optional)
+## Appendix B: Update Cognito User (Optional)
 NOTE: This step is only needed if Cognito is going to be enabled.
 
 The Cognito user that we created initially starts with a `FORCE_CHANGE_PASSWORD` status. This step will update the user status to `CONFIRMED`. To do this, set the password for the Cognito user. First we need to update `etc/execute_env.sh` with some new values. An email should have been sent to the configured email address with a temporary password. Update `COGNITO_USERTEMPPW` with that value. Generate a new permanent password that complies with the password requirements and update `COGNITO_USERPERMPW` with that value.
@@ -63,16 +88,15 @@ The Cognito user that we created initially starts with a `FORCE_CHANGE_PASSWORD`
 Use the provided helper script documented below to retrieve the outputs from the CloudFormation template.
 
 ```bash
-./describe.sh -p $PROFILE -s elasticsearch
+tmp/describe.sh -p $PROFILE -s elasticsearch
 ```
 
-Use those outputs to update the values for `COGNITO_USERPOOL` and `COGNITO_CLIENTID` in `etc/execute_env.sh`.
+Use those outputs to update the values for `COGNITO_USERPOOL` and `COGNITO_CLIENTID` in `etc/environment.sh`.
 
 Execute the cognito password update script. The output should be a JSON message that includes the AccessToken, IdToken, Refreshtoken, etc. 
 
 ```bash
-source etc/execute_env.sh
-./cognito.sh
+src/cognito.sh
 ```
 
 ## Troubleshooting Notes (Lessons Learned)

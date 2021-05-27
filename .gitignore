@@ -1,5 +1,5 @@
 # local files
 etc/cognito_role_mapping*
-etc/execute_env.*
+etc/environment.*
 tmp/*
 notes.md

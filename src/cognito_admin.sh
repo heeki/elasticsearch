@@ -1,4 +1,5 @@
 #!/bin/bash
+source etc/environment.sh
 
 OUTPUT1=`aws --profile $PROFILE cognito-idp admin-initiate-auth \
 --user-pool-id $COGNITO_USERPOOL \
@@ -19,4 +20,4 @@ OUTPUT3=`aws --profile $PROFILE cognito-idp initiate-auth \
 --auth-flow USER_PASSWORD_AUTH \
 --auth-parameters USERNAME=${COGNITO_USERNAME},PASSWORD=${COGNITO_USERPERMPW}`
 
-echo $OUTPUT3
+echo $OUTPUT3 | jq
